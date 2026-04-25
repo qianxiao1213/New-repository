@@ -39,13 +39,15 @@ class DGLabController:
         self.death_timer_end = 0.0
         self.debug_output = True
         self._connection_start_time = 0
-        self._strength_send_interval = 0.2
+        self._strength_send_interval = 0.05
         self._waveform_send_interval = 1
         self.monitor_life_enabled = True
-        # 新增：权重系数（默认100，表示 (1-health_percent)*100）
+        # 权重系数（默认100，表示 (1-health_percent)*100）
         self.health_weight = 100
-        # 新增：通道选择（1=仅A, 2=仅B, 3=AB同时）
+        # 通道选择（1=仅A, 2=仅B, 3=AB同时）
         self.channel_mode = 3  # 1:A, 2:B, 3:AB
+        # 玩家是否真正进入游戏世界（靠 spatial.district 判断）
+        self.player_in_game = False
 
     def set_debug_output(self, enabled: bool):
         self.debug_output = enabled
@@ -185,14 +187,26 @@ class DGLabController:
             print(f"➖ B通道手动偏移 -1，当前偏移={self.simple_control.manual_offset_b}")
 
     def update_auto_target(self, health_percent: float, is_combat: bool, is_dead: bool, stamina: float,
-                           config: Dict[str, Any]):
+                           config: Dict[str, Any], player_in_game: bool = False):
         now = time.time()
         if self._connection_start_time == 0:
             return
         if now - self._connection_start_time < 5:
             return
+        self.player_in_game = player_in_game
         if self.debug_output:
-            print(f"📊 [游戏状态] 生命={health_percent * 100:.1f}%, 战斗={is_combat}, 死亡={is_dead}, 体力={stamina}")
+            print(f"📊 [游戏状态] 生命={health_percent * 100:.1f}%, 战斗={is_combat}, 死亡={is_dead}, "
+                  f"体力={stamina}, 游戏中={player_in_game}")
+
+        # 最高优先级：未进入游戏世界（district 为 Unknown/空），强度直接归零
+        if not self.player_in_game:
+            self.auto_target_a = 0
+            self.auto_target_b = 0
+            if self.debug_output:
+                print(f"ℹ️ [过滤] 未进入游戏世界（district 不可用），强度设为0")
+            return
+
+        # 其次：死亡或体力耗尽
         if is_dead or stamina <= 0:
             self.death_timer_end = now + config.get('death_duration', 3)
             target = config.get('death_max_strength', 99)
@@ -201,11 +215,14 @@ class DGLabController:
             if self.debug_output:
                 print(f"💀 [特殊] 强度拉满至 {target}")
             return
+
+        # 死亡持续期内（保持高强度）
         if now < self.death_timer_end:
             return
+
+        # 正常游戏逻辑
         base = config.get('combat_base' if is_combat else 'idle_base', 10)
         if self.monitor_life_enabled:
-            # 使用权重系数：附加 = (1 - 生命值百分比) * 权重系数
             add = (1 - health_percent) * self.health_weight
         else:
             add = 0

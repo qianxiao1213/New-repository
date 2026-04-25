@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import threading
 import asyncio
 import json
@@ -77,6 +78,9 @@ class GameStateMonitor:
         self.last_health = 100.0
         self.last_stamina = 100.0
         self.last_pos_data = {}
+        self.latest_ndjson_path = None
+        self.latest_ndjson_mtime = 0.0
+        self.ndjson_first_check_done = False
 
     def read_health_stamina(self):
         if not self.path_config.health_stamina_path:
@@ -97,21 +101,45 @@ class GameStateMonitor:
 
     def read_pos_logger(self):
         if not self.path_config.pos_logger_dir:
+            self.latest_ndjson_mtime = 0.0
+            self.last_pos_data = {}
             return {}
+
         try:
-            files = glob.glob(os.path.join(self.path_config.pos_logger_dir, "*.ndjson")) + \
-                    glob.glob(os.path.join(self.path_config.pos_logger_dir, "*.json"))
+            files = glob.glob(os.path.join(self.path_config.pos_logger_dir, "*.ndjson"))
             if not files:
+                self.latest_ndjson_path = None
+                self.latest_ndjson_mtime = 0.0
+                self.last_pos_data = {}
                 return {}
-            latest = max(files, key=os.path.getctime)
-            with open(latest, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                if lines:
-                    last_line = lines[-1].strip()
-                    if last_line:
-                        self.last_pos_data = json.loads(last_line)
+
+            latest = max(files, key=os.path.getmtime)
+            mtime = os.path.getmtime(latest)
+            now = time.time()
+
+            # 首次检查：若文件修改时间超过5秒，视为旧会话残留数据
+            if not self.ndjson_first_check_done:
+                self.ndjson_first_check_done = True
+                if now - mtime > 5.0:
+                    self.latest_ndjson_path = latest
+                    self.latest_ndjson_mtime = mtime
+                    self.last_pos_data = {}
+                    print(f"⏰ [ndjson] 文件超过5秒未更新 ({(now - mtime):.1f}s)，视为旧会话残留")
+                    return {}
+
+            # 文件有新写入时更新数据
+            if latest != self.latest_ndjson_path or mtime != self.latest_ndjson_mtime:
+                self.latest_ndjson_path = latest
+                self.latest_ndjson_mtime = mtime
+                with open(latest, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    if lines:
+                        last_line = lines[-1].strip()
+                        if last_line:
+                            self.last_pos_data = json.loads(last_line)
         except:
             pass
+
         return self.last_pos_data
 
     def get_status(self):
@@ -123,6 +151,13 @@ class GameStateMonitor:
         max_health = status.get('health', 495)
         health_percent = health_percent_raw / 100.0
         health_current = health_percent * max_health
+
+        spatial = pos.get('spatial', {})
+        district = spatial.get('district', '')
+        now = time.time()
+        ndjson_active = bool(self.latest_ndjson_mtime > 0 and now - self.latest_ndjson_mtime <= 1.0)
+        player_in_game = ndjson_active and bool(district) and district != 'Unknown'
+
         return {
             'health_percent': health_percent,
             'health_current': health_current,
@@ -130,7 +165,10 @@ class GameStateMonitor:
             'is_combat': is_combat,
             'is_dead': is_dead,
             'max_health': max_health,
-            'pos_data': pos
+            'pos_data': pos,
+            'district': district,
+            'ndjson_active': ndjson_active,
+            'player_in_game': player_in_game
         }
 
 
@@ -418,12 +456,15 @@ class CyberpunkDGLabApp(QMainWindow):
                 self.combat_label.setText("✅ 非战斗状态")
                 self.combat_label.setStyleSheet("color: green;")
 
+        player_in_game = status['player_in_game']
+        district = status['district']
         pos = status['pos_data']
-        spatial = pos.get('spatial', {})
         if self.pos_label:
+            spatial = pos.get('spatial', {})
             self.pos_label.setText(
                 f"X: {spatial.get('x', 0):.1f}  Y: {spatial.get('y', 0):.1f}  "
-                f"Z: {spatial.get('z', 0):.1f}  速度: {spatial.get('speed', 0):.1f}"
+                f"Z: {spatial.get('z', 0):.1f}  速度: {spatial.get('speed', 0):.1f}  "
+                f"区域: {district}"
             )
 
         quest = pos.get('narrative', {})
@@ -462,7 +503,8 @@ class CyberpunkDGLabApp(QMainWindow):
             status['is_combat'],
             status['is_dead'],
             status['stamina'],
-            dglab_config
+            dglab_config,
+            player_in_game
         )
 
     def refresh_dglab_display(self):
