@@ -1,7 +1,24 @@
 PythonProject3/
-├── main.py
-├── main_window.ui
-├── dglab_controller.py
-├── config.py
-├── software_icon.ico        # 程序图标
-└── game_paths.json          # 运行后自动生成
+├── main.py                    # 主程序入口（UI + 游戏监控 + DGLab 控制）
+├── main_window.ui             # Qt UI 布局文件
+├── dglab_controller.py        # DGLab WebSocket 控制器（强度/波形发送）
+├── config.py                  # 波形数据 + 默认配置
+├── waveform_converter.py      # 波形数据格式转换工具
+├── build.py                   # PyInstaller 打包脚本
+├── CyberpunkDGLab.spec        # PyInstaller 打包配置
+├── software_icon.ico          # 程序图标
+├── game_paths.json            # 运行后自动生成（游戏文件路径配置）
+├── DG-LAB-CP2077.md           # 项目说明文档
+├── 项目目录结构.txt            # 目录结构说明
+│
+├── dist/                      # 构建输出 + CET Lua 脚本
+│   ├── CyberpunkDGLab.exe     # 编译后的可执行程序
+│   ├── cy2077-DG-LAB/         # HealthMonitor Lua 脚本（监控生命值/体力）
+│   │   └── init.lua
+│   ├── PosLogger/             # PosLogger Lua 脚本（Rezo Agwe，输出玩家数据）
+│   │   └── init.lua
+│   ├── dg_lab_qrcode.png      # DG-Lab 连接二维码
+│   ├── game_paths.json        # 路径配置文件
+│   └── 说明.txt               # 使用说明
+│
+└── build/                     # PyInstaller 构建缓存
